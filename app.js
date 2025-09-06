@@ -138,7 +138,11 @@ function setupEventListeners() {
     document.getElementById('latInput').addEventListener('input', updateGPSCoordinates);
     document.getElementById('lngInput').addEventListener('input', updateGPSCoordinates);
     document.getElementById('altInput').addEventListener('input', updateGPSCoordinates);
-    
+
+    // Prompt generation controls
+    document.getElementById('generatePromptMapBtn').addEventListener('click', () => generateFromPrompt('map'));
+    document.getElementById('generatePromptModelBtn').addEventListener('click', () => generateFromPrompt('model'));
+
     // Settings
     document.getElementById('densitySlider').addEventListener('input', updateDensity);
     document.getElementById('lightingSlider').addEventListener('input', updateLighting);
@@ -598,8 +602,98 @@ function createMapVisualization(mapData, mapType) {
         mapData.bounds.minZ
     );
     mapObject.rotation.x = -Math.PI / 2;
-    
+
     scene.add(mapObject);
+}
+
+function generateFromPrompt(type) {
+    const prompt = document.getElementById('promptInput').value.trim();
+    if (!prompt) {
+        alert('Please enter a prompt');
+        return;
+    }
+
+    const resolution = parseFloat(document.getElementById('mapResolutionSlider').value) || 1.0;
+
+    if (type === 'map') {
+        mapData = createMapFromPrompt(prompt, resolution);
+        createMapVisualization(mapData, 'terrain');
+        document.getElementById('exportGeoTIFF').disabled = false;
+        document.getElementById('exportKML').disabled = false;
+        alert('3D map generated from prompt!');
+    } else if (type === 'model') {
+        createModelFromPrompt(prompt);
+        enableExportButtons();
+        alert('3D model generated from prompt!');
+    }
+}
+
+function createMapFromPrompt(prompt, resolution) {
+    const gridSize = 50;
+    const seed = stringToSeed(prompt);
+    const rng = mulberry32(seed);
+    const lower = prompt.toLowerCase();
+    let amplitude = 10;
+
+    if (lower.includes('mountain')) amplitude = 30;
+    else if (lower.includes('hill')) amplitude = 15;
+    else if (lower.includes('flat')) amplitude = 2;
+
+    const heightMap = Array.from({ length: gridSize }, () =>
+        Array.from({ length: gridSize }, () => rng() * amplitude)
+    );
+
+    const bounds = {
+        minX: 0,
+        maxX: gridSize * resolution,
+        minY: 0,
+        maxY: gridSize * resolution,
+        minZ: 0,
+        maxZ: amplitude
+    };
+
+    return { heightMap, bounds, gridSize, resolution, type: 'prompt' };
+}
+
+function createModelFromPrompt(prompt) {
+    const lower = prompt.toLowerCase();
+    let geometry;
+
+    if (lower.includes('sphere')) {
+        geometry = new THREE.SphereGeometry(1, 32, 32);
+    } else if (lower.includes('cylinder')) {
+        geometry = new THREE.CylinderGeometry(1, 1, 2, 32);
+    } else if (lower.includes('pyramid')) {
+        geometry = new THREE.ConeGeometry(1, 2, 4);
+    } else {
+        geometry = new THREE.BoxGeometry(1, 1, 1);
+    }
+
+    const material = new THREE.MeshNormalMaterial();
+
+    if (meshObject) scene.remove(meshObject);
+    meshObject = new THREE.Mesh(geometry, material);
+    scene.add(meshObject);
+    hideViewerOverlay();
+    switchViewMode('mesh');
+}
+
+function stringToSeed(str) {
+    let h = 1779033703 ^ str.length;
+    for (let i = 0; i < str.length; i++) {
+        h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+        h = (h << 13) | (h >>> 19);
+    }
+    return h >>> 0;
+}
+
+function mulberry32(a) {
+    return function() {
+        let t = a += 0x6D2B79F5;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
 }
 
 function switchToMapView() {
